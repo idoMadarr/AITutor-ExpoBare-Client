@@ -1,6 +1,6 @@
 import { Colors } from '@/utils/palette';
 import React, { useEffect } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -13,6 +13,7 @@ import Animated, {
 interface Props {
   amplitude: number;
   isSpeaking: boolean;
+  newChat: boolean;
 }
 
 const GLOW_LAYERS = [
@@ -21,16 +22,26 @@ const GLOW_LAYERS = [
   { scale: 1.35, opacity: 0.06, size: 140 },
 ];
 
+const centerY = Dimensions.get('window').height * 0.4;
+const centerX = Dimensions.get('window').width * 0.47;
 const CIRCLE_BASE_SIZE = Dimensions.get('window').width * 0.15;
 
-const AISpeakingCircle: React.FC<Props> = ({ amplitude, isSpeaking }) => {
+const AISpeakingCircle: React.FC<Props> = ({
+  amplitude,
+  isSpeaking,
+  newChat,
+}) => {
   const scale = useSharedValue(1);
+  const translateY = useSharedValue(1);
+  const translateX = useSharedValue(1);
+
+  useEffect(() => {
+    updatePosition();
+  }, [newChat]);
 
   // SPEAKING → audio driven
   useEffect(() => {
     if (!isSpeaking) return;
-
-    // cancelAnimation(scale);
 
     scale.value = withTiming(1 + amplitude * 0.4, {
       duration: 80,
@@ -65,6 +76,18 @@ const AISpeakingCircle: React.FC<Props> = ({ amplitude, isSpeaking }) => {
     transform: [{ scale: scale.value }],
   }));
 
+  const offsetStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: translateY.value },
+      { translateX: translateX.value },
+    ],
+  }));
+
+  const updatePosition = () => {
+    translateY.value = withTiming(newChat ? centerY : 0, { duration: 800 });
+    translateX.value = withTiming(newChat ? -centerX : 0, { duration: 800 });
+  };
+
   const glowStyle = (multiplier: number) =>
     useAnimatedStyle(() => ({
       transform: [{ scale: scale.value * multiplier }],
@@ -74,7 +97,7 @@ const AISpeakingCircle: React.FC<Props> = ({ amplitude, isSpeaking }) => {
     }));
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, offsetStyle]}>
       {GLOW_LAYERS.map((layer, index) => (
         <Animated.View
           key={index}
@@ -92,7 +115,7 @@ const AISpeakingCircle: React.FC<Props> = ({ amplitude, isSpeaking }) => {
       ))}
 
       <Animated.View style={[styles.circle, coreStyle]} />
-    </View>
+    </Animated.View>
   );
 };
 

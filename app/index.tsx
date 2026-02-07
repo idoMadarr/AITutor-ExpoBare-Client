@@ -1,15 +1,19 @@
 import AISpeakingCircle from '@/components/AISpeakingCircle/AISpeakingCircle';
+import ChatItemMessage from '@/components/ChatMessage/ChatMessage';
 import TextElement from '@/components/Reuseable/TextElement';
 import { ChatMessage, ChatType, RoleType } from '@/models/Chat';
 import { Colors } from '@/utils/palette';
 import useKeyboard from '@/utils/useKeyboard';
 import { playTTS } from '@/utils/voice';
+import Entypo from '@expo/vector-icons/Entypo';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import axios from 'axios';
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -24,6 +28,7 @@ import {
 import Config from 'react-native-config';
 import Animated, {
   useAnimatedStyle,
+  useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,7 +41,6 @@ export default function Index() {
   const { keyboardHeight } = useKeyboard();
 
   const [chat, setChat] = useState<ChatType>([]);
-  const [recognizing, setRecognizing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [userMessage, setUserMessage] = useState<string>('');
   const [amplitude, setAmplitude] = useState(0);
@@ -44,6 +48,11 @@ export default function Index() {
 
   const recognitionRef = useRef('');
   const flatlistRef = useRef<FlatList>(null);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    opacity.value = withTiming(chat.length === 0 ? 1 : 0, { duration: 1400 });
+  }, [chat]);
 
   const updateUserMessage = (val: string) => {
     setUserMessage(val);
@@ -59,9 +68,8 @@ export default function Index() {
     ],
   }));
 
-  useSpeechRecognitionEvent('start', () => setRecognizing(true));
+  useSpeechRecognitionEvent('start', () => {});
   useSpeechRecognitionEvent('end', () => {
-    setRecognizing(false);
     onSend(recognitionRef.current, 'speech');
   });
   useSpeechRecognitionEvent('result', event => {
@@ -132,10 +140,54 @@ export default function Index() {
     });
   };
 
+  const opacityStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle={'light-content'} backgroundColor={Colors.black} />
-      <AISpeakingCircle amplitude={amplitude} isSpeaking={isSpeaking} />
+      <Pressable
+        onPress={() => {
+          setChat([]);
+        }}
+        style={({ pressed }) => [
+          {
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: 60,
+            height: 60,
+            opacity: pressed ? 0.6 : 1,
+          },
+        ]}
+      >
+        <Entypo name='plus' size={22} color={'white'} />
+        <TextElement>New</TextElement>
+      </Pressable>
+      <AISpeakingCircle
+        amplitude={amplitude}
+        isSpeaking={isSpeaking}
+        newChat={chat.length === 0}
+      />
+
+      <Animated.View
+        style={[
+          {
+            width: Dimensions.get('window').width * 0.8,
+            opacity: 0.5,
+            position: 'absolute',
+            bottom: '48%',
+            alignSelf: 'center',
+          },
+          opacityStyle,
+        ]}
+      >
+        <TextElement cStyles={{ textAlign: 'center' }}>
+          {
+            'Hi, I’m your AI Tutor, ready to help you learn, practice, and improve at your own pace.'
+          }
+        </TextElement>
+      </Animated.View>
 
       <FlatList
         ref={flatlistRef}
@@ -145,25 +197,7 @@ export default function Index() {
         ItemSeparatorComponent={() => <View style={styles.seperator} />}
         renderItem={({ item }) => {
           const isUser = item.role === RoleType.USER;
-
-          const customStyles = {
-            ...styles.labelRole,
-            alignSelf: isUser ? 'flex-start' : 'flex-end',
-            backgroundColor: isUser ? Colors.secondary : Colors.primary,
-          };
-
-          return (
-            <View style={styles.itemContainer}>
-              <TextElement cStyles={customStyles}>
-                {item.role === RoleType.AGENT ? 'Agent' : 'User'}
-              </TextElement>
-              <TextElement
-                cStyles={{ alignSelf: isUser ? 'flex-start' : 'flex-end' }}
-              >
-                {item.content}
-              </TextElement>
-            </View>
-          );
+          return <ChatItemMessage item={item} isUser={isUser} />;
         }}
       />
 
@@ -188,7 +222,7 @@ export default function Index() {
               { opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            <TextElement>{`Send`}</TextElement>
+            <Ionicons name={'send'} size={18} color={Colors.black} />
           </Pressable>
         ) : (
           <Pressable
@@ -199,7 +233,11 @@ export default function Index() {
               { opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            <TextElement>{`${recognizing ? 'Stop' : 'Push'}`}</TextElement>
+            <MaterialIcons
+              name={'keyboard-voice'}
+              size={24}
+              color={Colors.black}
+            />
           </Pressable>
         )}
       </Animated.View>
@@ -223,25 +261,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     paddingHorizontal: '3%',
-  },
-  itemContainer: {
-    paddingHorizontal: '4%',
-    justifyContent: 'center',
-    minHeight: 40,
-    width: Dimensions.get('window').width * 0.85,
-    marginVertical: 2,
-    borderRadius: 8,
-    // borderBottomWidth: 1,
-    // borderColor: '#ccc',
-    paddingVertical: '4%',
-  },
-  labelRole: {
-    fontSize: 10,
-    paddingVertical: '1%',
-    paddingHorizontal: '4%',
-    borderRadius: 4,
-    color: 'white',
-    marginBottom: '4%',
   },
   input: {
     height: 50,
