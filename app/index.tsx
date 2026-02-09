@@ -4,17 +4,18 @@ import TextElement from '@/components/Reuseable/TextElement';
 import { ChatMessage, ChatType, RoleType } from '@/models/Chat';
 import { Colors } from '@/utils/palette';
 import useKeyboard from '@/utils/useKeyboard';
-import { playTTS } from '@/utils/voice';
 import Entypo from '@expo/vector-icons/Entypo';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import axios from 'axios';
+import { useAudioPlayer } from 'expo-audio';
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Keyboard,
@@ -25,7 +26,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Config from 'react-native-config';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -33,15 +33,18 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const connect = Config.MOBILE_SERVER;
+// const connect = Config.MOBILE_SERVER;
+const connect = 'https://smalltalk-fastapi-openai.onrender.com';
 const MAX_HISTORY = 6;
 
 export default function Index() {
   const { width } = useWindowDimensions();
   const { keyboardHeight } = useKeyboard();
+  const player = useAudioPlayer(undefined);
 
   const [chat, setChat] = useState<ChatType>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [userMessage, setUserMessage] = useState<string>('');
   const [amplitude, setAmplitude] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,29 +57,64 @@ export default function Index() {
     opacity.value = withTiming(chat.length === 0 ? 1 : 0, { duration: 1400 });
   }, [chat]);
 
+  const smoothedAmplitude = useRef(0);
+
+  useEffect(() => {
+    const sub = player.addListener('playbackStatusUpdate', status => {
+      if (status.didJustFinish) {
+        setIsSpeaking(false);
+        setAmplitude(0);
+      }
+      if (status.playing) {
+        setIsSpeaking(true);
+      }
+    });
+
+    return () => sub.remove();
+  }, [player]);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    if (isSpeaking) {
+      interval = setInterval(() => {
+        amplitudeFunc();
+      }, 100);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isSpeaking]);
+
+  const amplitudeFunc = useCallback(() => {
+    const smoothingFactor = 0.1;
+    const target = Math.random(); // fake amplitude
+
+    const prev = smoothedAmplitude.current;
+    const next = prev + (target - prev) * smoothingFactor;
+
+    smoothedAmplitude.current = next;
+    setAmplitude(next);
+  }, []);
+
   const updateUserMessage = (val: string) => {
     setUserMessage(val);
   };
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: withTiming(-keyboardHeight.value, {
-          duration: 250,
-        }),
-      },
-    ],
-  }));
-
-  useSpeechRecognitionEvent('start', () => {});
+  useSpeechRecognitionEvent('start', () => {
+    setIsRecording(true);
+  });
   useSpeechRecognitionEvent('end', () => {
     onSend(recognitionRef.current, 'speech');
+    setIsRecording(false);
   });
   useSpeechRecognitionEvent('result', event => {
     const text = event.results[0]?.transcript;
     recognitionRef.current = text;
   });
   useSpeechRecognitionEvent('error', event => {
+    setIsRecording(false);
     console.log('error code:', event.error, 'error message:', event.message);
   });
 
@@ -107,19 +145,15 @@ export default function Index() {
 
       setIsLoading(false);
 
-      let smoothedAmplitude = 0;
-      const smoothingFactor = 0.1;
-
       flatlistRef.current?.scrollToEnd({ animated: true });
-      setIsSpeaking(true);
-      await playTTS(
-        `${connect}${response.data.agent_audio_message}`,
-        rawAmp => {
-          smoothedAmplitude += (rawAmp - smoothedAmplitude) * smoothingFactor;
-          setAmplitude(smoothedAmplitude);
-        },
-      );
-      setIsSpeaking(false);
+
+      const audioTrack = `${connect}${response.data.agent_audio_message}`;
+
+      if (player.playing) {
+        player.pause();
+      }
+      player.replace({ uri: audioTrack });
+      player.play();
     } catch (error) {
       console.log(error);
       setIsLoading(false);
@@ -127,11 +161,14 @@ export default function Index() {
   };
 
   const handleStart = async () => {
+    if (isLoading) return;
+
     const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!result.granted) {
       console.warn('Permissions not granted', result);
       return;
     }
+
     // Start speech recognition
     ExpoSpeechRecognitionModule.start({
       lang: 'en-US',
@@ -140,7 +177,17 @@ export default function Index() {
     });
   };
 
-  const opacityStyle = useAnimatedStyle(() => ({
+  const controllerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: withTiming(-keyboardHeight.value, {
+          duration: 250,
+        }),
+      },
+    ],
+  }));
+
+  const textAnimatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
@@ -152,11 +199,8 @@ export default function Index() {
           setChat([]);
         }}
         style={({ pressed }) => [
+          styles.menuItem,
           {
-            justifyContent: 'center',
-            alignItems: 'center',
-            width: 60,
-            height: 60,
             opacity: pressed ? 0.6 : 1,
           },
         ]}
@@ -170,19 +214,8 @@ export default function Index() {
         newChat={chat.length === 0}
       />
 
-      <Animated.View
-        style={[
-          {
-            width: Dimensions.get('window').width * 0.8,
-            opacity: 0.5,
-            position: 'absolute',
-            bottom: '48%',
-            alignSelf: 'center',
-          },
-          opacityStyle,
-        ]}
-      >
-        <TextElement cStyles={{ textAlign: 'center' }}>
+      <Animated.View style={[styles.helloText, textAnimatedStyle]}>
+        <TextElement cStyles={styles.textAlign}>
           {
             'Hi, I’m your AI Tutor, ready to help you learn, practice, and improve at your own pace.'
           }
@@ -201,13 +234,13 @@ export default function Index() {
         }}
       />
 
-      <Animated.View style={[styles.controller, animatedStyle]}>
+      <Animated.View style={[styles.controller, controllerAnimatedStyle]}>
         <TextInput
           value={userMessage}
           onChangeText={updateUserMessage}
-          placeholder={'Ask Something...'}
+          placeholder={isRecording ? 'Recording...' : 'Ask Something...'}
           cursorColor={'white'}
-          placeholderTextColor={'white'}
+          placeholderTextColor={isRecording ? 'red' : 'white'}
           style={[styles.input, { width: width * 0.65 }]}
         />
 
@@ -222,7 +255,11 @@ export default function Index() {
               { opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            <Ionicons name={'send'} size={18} color={Colors.black} />
+            {isLoading ? (
+              <ActivityIndicator size={'small'} color={Colors.black} />
+            ) : (
+              <Ionicons name={'send'} size={18} color={Colors.black} />
+            )}
           </Pressable>
         ) : (
           <Pressable
@@ -233,11 +270,15 @@ export default function Index() {
               { opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            <MaterialIcons
-              name={'keyboard-voice'}
-              size={24}
-              color={Colors.black}
-            />
+            {isLoading ? (
+              <ActivityIndicator size={'small'} color={Colors.black} />
+            ) : (
+              <MaterialIcons
+                name={'keyboard-voice'}
+                size={24}
+                color={Colors.black}
+              />
+            )}
           </Pressable>
         )}
       </Animated.View>
@@ -250,6 +291,18 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: Dimensions.get('window').height * 0.02,
     backgroundColor: Colors.black,
+  },
+  menuItem: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 60,
+    height: 60,
+  },
+  helloText: {
+    width: Dimensions.get('window').width * 0.8,
+    position: 'absolute',
+    bottom: '48%',
+    alignSelf: 'center',
   },
   controller: {
     flexDirection: 'row',
@@ -287,5 +340,9 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.white,
     opacity: 0.5,
+  },
+  textAlign: {
+    textAlign: 'center',
+    opacity: 0.6,
   },
 });
