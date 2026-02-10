@@ -1,7 +1,8 @@
 import { RoleType } from '@/models/Chat';
 import { Colors } from '@/utils/palette';
 import React from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import TextElement from '../Reuseable/TextElement';
 
 interface ChatItemMessagePropsType {
@@ -20,14 +21,17 @@ const ChatItemMessage: React.FC<ChatItemMessagePropsType> = ({
   };
 
   return (
-    <View style={styles.itemContainer}>
+    <Animated.View
+      entering={FadeInUp.duration(350)}
+      style={styles.itemContainer}
+    >
       <TextElement cStyles={customStyles}>
         {item.role === RoleType.AGENT ? 'Agent' : 'User'}
       </TextElement>
       <TextElement cStyles={{ alignSelf: isUser ? 'flex-start' : 'flex-end' }}>
         {item.content}
       </TextElement>
-    </View>
+    </Animated.View>
   );
 };
 

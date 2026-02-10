@@ -16,6 +16,7 @@ const TextElement: React.FC<TextElementPropsType> = ({
 
 const styles = StyleSheet.create({
   text: {
+    fontFamily: 'Poppins-Regular',
     color: Colors.white,
   },
 });
